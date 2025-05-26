@@ -152,28 +152,13 @@ class CourseRecommendationBandit:
 
     def _get_all_subjects(self) -> List[str]:
         """Get list of all subject codes"""
-        # Extract unique subject_ids from available courses
-        subjects = list(set(course.get('subject_id', '')
-                        for course in self.available_courses if course.get('subject_id')))
-        return subjects if subjects else [
-            "ACCT", "ADGD", "AE", "AFAS", "ANAT", "ANIM", "ANTH", "ARBC", "ARCH", "ARTH", "AS-I", "BACS", "BET", "BIO", "BLAW", "BMES", "BSAN", "BUSN", "CAE"
-        ]
+        from subjects import subjects
+        return subjects
 
     def _get_common_majors(self) -> List[str]:
         """Get list of common majors"""
-        return [
-            "Accounting (BSBA)", "Air Force ROTC", "Animation & Visual Effects (BS)", "Architectural Engineering (BSAE)",
-            "Architectural Studies (BS)", "Computer Science (BS)", "Electrical Engineering (BSEE)", "Mechanical Engineering (BSME)",
-            "Business Administration (BSBA)", "Biology (BS)", "Chemistry (BS)", "Physics (BS)", "Mathematics (BS)",
-            "English (BA)", "History (BA)", "Psychology (BS)", "Political Science (BA)", "Economics (BS)", "Art (BFA)",
-            "Music (BM)", "Theatre Arts (BFA)", "Communications (BA)", "Journalism (BS)", "Marketing (BSBA)",
-            "Finance (BSBA)", "Management (BSBA)", "Information Systems (BS)", "Civil Engineering (BSCE)",
-            "Chemical Engineering (BSChE)", "Industrial Engineering (BSIE)", "Biomedical Engineering (BSBME)",
-            "Environmental Engineering (BSEE)", "Petroleum Engineering (BSPE)", "Geology (BS)", "Geography (BS)",
-            "Sociology (BA)", "Anthropology (BA)", "Philosophy (BA)", "Religious Studies (BA)", "Foreign Languages (BA)",
-            "Education (BS)", "Nursing (BSN)", "Social Work (BSW)", "Criminal Justice (BS)", "Public Administration (BPA)",
-            "International Studies (BA)", "Pre-Med", "Pre-Law", "Pre-Dental", "Pre-Pharmacy", "Pre-Veterinary", "Undeclared"
-        ]
+        from majors import majors
+        return majors
 
     def _create_course_actions(self) -> List[CourseAction]:
         """Create list of possible course actions from available courses"""
