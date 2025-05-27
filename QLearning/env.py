@@ -8,40 +8,63 @@ class CourseRecEnv:
     self.current_state = None
 
   def reset(self, profile):
+    self.profile = profile
     self.current_state = {
-      "profile": utils.encodeProfile(profile),
       "hovered_courses": set(),
-      "watchlist": set()
+      "watchlist": set(),
+      "last_hovered": -1,
+      "last_watchlisted": -1
     }
     return self._getState()
 
   def _getState(self):
-    hover_count = len(self.current_state["hovered_courses"])
-    watchlist_count = len(self.current_state["watchlist"])
-    return self.current_state["profile"] + (hover_count, watchlist_count)
+    major_encoding = utils.encode_major(self.profile["major"])  # e.g., CS → 0
+    year = self.profile["year"]
+    hovered = self.current_state["last_hovered"]
+    watchlisted = self.current_state["last_watchlisted"]
+    return (major_encoding, year, hovered, watchlisted)
 
   def step(self, action):
+    course = self.courses[action]
     reward = 0
-    done = False
-    info = {}
 
-    if action == 1:  # Recommend courses to explore
-      recommended = random.sample(self.courses, min(3, len(self.courses)))
-      hovered = random.choice(recommended)
-      course_id = f"{hovered['subject']} {hovered['number']}"
-      self.current_state["hovered_courses"].add(course_id)
-      reward += 1
-      if random.random() < 0.3:
-        self.current_state["watchlist"].add(course_id)
-        reward += 5
+    course_id = action
+    self.current_state["hovered_courses"].add(course_id)
+    self.current_state["last_hovered"] = course_id
+    reward += 1
 
-    elif action == 2:  # Recommend filters
-      #TODO:elaborate action 
-      reward += 0.5
+    if course.get("subject", "").lower() == self.profile["major"].lower():
+      reward += 3
 
-    elif action == 3:  # Recommend search terms
-      #TODO:elaborate action
-      reward += 0.3
+    #trying to make env more sochastic
+    watchlist_prob = 0.3
+    subject = course.get("subject", "").lower()
+    number_str = course.get("number", "100")
+    try:
+        number = int(number_str)
+    except ValueError:
+        number = 100
 
-    return self._getState(), reward, done, info
+    if subject == self.profile["major"].lower():
+        watchlist_prob = 0.6
+
+    year = self.profile.get("year", 1)
+    if (year == 1 and number < 300) or \
+      (year == 2 and number < 400) or \
+      (year == 3 and number < 500) or \
+      (year >= 4):
+        watchlist_prob += 0.2
+    else:
+        watchlist_prob -= 0.2
+
+    watchlist_prob = max(0.0, min(watchlist_prob, 1.0))
+
+    if random.random() < watchlist_prob:
+      self.current_state["watchlist"].add(course_id)
+      self.current_state["last_watchlisted"] = course_id
+      reward += 5
+
+    new_state = self._getState()
+    return new_state, reward, False, {}
+
 

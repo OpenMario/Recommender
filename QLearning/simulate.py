@@ -3,34 +3,30 @@ from agent import QLearningAgent
 import utils
 
 def runSession():
-    courses = utils.loadCourses("../assets/courses.json")
+  courses = utils.loadCourses("../assets/courses.json")
+  env = CourseRecEnv(courses)
+  agent = QLearningAgent(action_space=range(len(courses)), state_dim=4)
+  agent.load("trained_agent.pkl")
 
-    # Set up environment and agent
-    env = CourseRecEnv(courses)
-    agent = QLearningAgent(action_space=[1, 2, 3], state_dim=6)
-    agent.load("trained_agent.pkl")
+  profile = {"major": "CS", "year": 3}
+  state = env.reset(profile)
 
-    # Simulate a session
-    state = env.reset({"major": "CS", "year": 3})
-    for step in range(10):
-        action = agent.getAction(state)
-        next_state, reward, done, info = env.step(action)
-        print(f"\nStep {step+1}:")
-        print(f"  Action: {action}")
-        print(f"  Reward: {reward}")
+  print(f"\nRecommendations for {profile['major']} year {profile['year']} student:\n")
 
-        
-        print(f"  Hovered Courses: {env.current_state['hovered_courses']}")
-        print(f"  Watchlist: {env.current_state['watchlist']}")
+  for i in range(5):
+    action = agent.getAction(state)
+    course = courses[action]
+    title = f"{course['subject']} {course['number']}: {course['title']}"
+    print(f"Recommended: {title}")
+    state, _, _, _ = env.step(action)
 
-        state = next_state
+    hovered_titles = [f"{courses[idx]['subject']} {courses[idx]['number']}: {courses[idx]['title']}" for idx in env.current_state["hovered_courses"]]
+    watchlist_titles = [f"{courses[idx]['subject']} {courses[idx]['number']}: {courses[idx]['title']}" for idx in env.current_state["watchlist"]]
 
-def getCourseTitle(course_id, courses):
-    subject, number = course_id.split()
-    for course in courses:
-        if course["subject"] == subject and course["number"] == number:
-            return course["title"]
-    return "Unknown Course"
+    print(f"  Hovered courses so far: {hovered_titles}")
+    print(f"  Watchlist so far: {watchlist_titles}\n")
 
 
-runSession()
+
+if __name__ == "__main__":
+  runSession()

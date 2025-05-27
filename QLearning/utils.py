@@ -45,6 +45,11 @@ def encodeProfile(profile):
 
   return tuple(major_vec + [year_norm] + interest_vec)
 
+def encode_major(major):
+    majors = ["cs", "math", "architecture", "biology"]  #TODO:connect to txt list
+    return majors.index(major.lower()) if major.lower() in majors else -1
+
+
 def readPickle(pickle_file, json_file=''):
   with open(pickle_file, 'rb') as f:
     data = pickle.load(f)
@@ -54,4 +59,4 @@ def readPickle(pickle_file, json_file=''):
   #with open('data.json', 'w') as f:
     #json.dump(data, f, indent=2)
 
-readPickle('trained_agent.pkl')
+#readPickle('trained_agent.pkl')
