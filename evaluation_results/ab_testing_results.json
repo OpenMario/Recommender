@@ -1,0 +1,54 @@
+{
+  "standard": {
+    "cumulative_reward": 375.0240000000067,
+    "average_reward": 0.15999317406143632,
+    "regret": 92.35694163443617,
+    "click_through_rate": 0.19069965870307168,
+    "watchlist_rate": 0.11433447098976109,
+    "coverage": 0.3,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.3050341296928328,
+    "recall_at_k": 0.3050341296928328,
+    "ndcg_at_k": 0.59925289481779,
+    "exploration_rate": 0.2977815699658703
+  },
+  "high_exploration": {
+    "cumulative_reward": 352.42400000000663,
+    "average_reward": 0.1583216531895807,
+    "regret": 7.967194188076689,
+    "click_through_rate": 0.1765498652291105,
+    "watchlist_rate": 0.11859838274932614,
+    "coverage": 0.84,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.29514824797843664,
+    "recall_at_k": 0.29514824797843664,
+    "ndcg_at_k": 0.6126860197616301,
+    "exploration_rate": 0.49865229110512127
+  },
+  "fast_learning": {
+    "cumulative_reward": 355.6280000000051,
+    "average_reward": 0.15911767337807833,
+    "regret": 80.88905556981479,
+    "click_through_rate": 0.19105145413870245,
+    "watchlist_rate": 0.11275167785234899,
+    "coverage": 0.41,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.30380313199105147,
+    "recall_at_k": 0.30380313199105147,
+    "ndcg_at_k": 0.5947505317259036,
+    "exploration_rate": 0.636241610738255
+  },
+  "conservative": {
+    "cumulative_reward": 360.6640000000059,
+    "average_reward": 0.1584639718804947,
+    "regret": 31.61358759558277,
+    "click_through_rate": 0.18717047451669597,
+    "watchlist_rate": 0.11467486818980668,
+    "coverage": 0.33,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.30184534270650265,
+    "recall_at_k": 0.30184534270650265,
+    "ndcg_at_k": 0.5907971301519928,
+    "exploration_rate": 0.18365553602811951
+  }
+}

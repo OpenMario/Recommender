@@ -1,465 +1,614 @@
+#!/usr/bin/env python3
+"""
+Complete Bandit Evaluation Main Script
+
+This script demonstrates comprehensive evaluation of the course recommendation
+contextual bandit system using all evaluation methods except live data.
+
+Includes:
+- Simulation-based evaluation
+- Offline evaluation with historical data
+- Cross-validation
+- A/B testing between different bandit configurations
+- Performance analysis and reporting
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Tuple, Dict, Optional
-from pydantic import BaseModel, Field, field_validator
-from enum import Enum
+import pandas as pd
 import json
-
-
-class ClassificationLevel(Enum):
-    FRESHMAN = 0
-    SOPHOMORE = 1
-    PRE_JUNIOR = 2
-    JUNIOR = 3
-    SENIOR = 4
-
-
-class StudentContext(BaseModel):
-    """Represents the context/state of a student"""
-    major: str
-    classification: ClassificationLevel
-    previous_courses: List[str] = Field(
-        default_factory=list, description="List of subject codes (e.g., ['MATH', 'PHYS'])")
-    current_gpa: float = Field(ge=0.0, le=4.0, description="GPA on 4.0 scale")
-    credits_completed: int = Field(ge=0, description="Total credits completed")
-    time_preference: str = Field(
-        description="'morning', 'afternoon', 'evening'")
-    preferred_days: List[str] = Field(
-        default_factory=list, description="['Monday', 'Tuesday', etc.]")
-    current_search_text: str = Field(
-        default="", description="Current search query")
-    active_filters: List[str] = Field(
-        default_factory=list, description="Active search filters")
-    session_hovers: List[str] = Field(
-        default_factory=list, description="Courses hovered in current session")
-    session_watchlisted: List[str] = Field(
-        default_factory=list, description="Courses added to watchlist")
-    session_paginations: int = Field(
-        default=0, ge=0, description="Number of times user went to next page")
-
-    @field_validator('time_preference')
-    @classmethod
-    def validate_time_preference(cls, v):
-        valid_times = ['morning', 'afternoon', 'evening']
-        if v not in valid_times:
-            raise ValueError(f'time_preference must be one of {valid_times}')
-        return v
-
-    @field_validator('preferred_days')
-    @classmethod
-    def validate_preferred_days(cls, v):
-        valid_days = ['Monday', 'Tuesday', 'Wednesday',
-                      'Thursday', 'Friday', 'Saturday', 'Sunday']
-        invalid_days = [day for day in v if day not in valid_days]
-        if invalid_days:
-            raise ValueError(f'Invalid days: {
-                             invalid_days}. Must be from {valid_days}')
-        return v
-
-    class Config:
-        use_enum_values = True
-
-
-class CourseAction(BaseModel):
-    """Represents a course recommendation action"""
-    course_subject: str
-    course_number: str
-    course_title: str
-    credits: str
-    college_code: str
-    section_info: Dict = Field(
-        default_factory=dict, description="Contains CRN, times, days, etc.")
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class CourseRecommendationBandit:
-    """
-    Contextual bandit for course recommendations using student context
-    and behavioral signals.
-    """
-
-    def __init__(self, available_courses: List[Dict], learning_rate: float = 0.01,
-                 epsilon: float = 0.15, epsilon_decay: float = 0.995):
-        """
-        Initialize the course recommendation bandit.
-
-        Args:
-            available_courses: List of available course dictionaries
-            learning_rate: Learning rate for weight updates
-            epsilon: Exploration probability
-            epsilon_decay: Decay factor for epsilon
-        """
-        self.available_courses = available_courses
-        self.learning_rate = learning_rate
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-
-        # Define context feature dimensions
-        self.context_dim = self._calculate_context_dimension()
-
-        # We'll treat each unique course as an action
-        self.course_actions = self._create_course_actions()
-        self.n_actions = len(self.course_actions)
-
-        # Initialize weights for each course action
-        self.weights = np.random.normal(
-            0, 0.01, (self.n_actions, self.context_dim))
-
-        # Track statistics
-        self.total_reward = 0
-        self.n_steps = 0
-        self.reward_history = []
-        self.action_counts = np.zeros(self.n_actions)
-
-        # Subject mappings for encoding
-        self.subject_to_idx = {subj: idx for idx,
-                               subj in enumerate(self._get_all_subjects())}
-        self.major_to_idx = {maj: idx for idx,
-                             maj in enumerate(self._get_common_majors())}
-
-    def _calculate_context_dimension(self) -> int:
-        """Calculate the dimension of the context vector"""
-        # Student features:
-        # - Major (one-hot encoded, ~50 common majors)
-        # - Classification level (5 levels)
-        # - GPA (1 continuous)
-        # - Credits completed (1 continuous, normalized)
-        # - Time preference (3 categories: morning/afternoon/evening)
-        # - Day preferences (7 binary features for each day)
-        # - Previous courses (binary vector for each subject, ~160 subjects)
-        # - Current search features (TF-IDF style features, ~20)
-        # - Active filters (binary vector, ~10 common filters)
-        # - Behavioral signals:
-        #   - Session hovers count (1)
-        #   - Session watchlist count (1)
-        #   - Session pagination count (1)
-
-        major_dim = 50  # Common majors
-        classification_dim = 5
-        continuous_dim = 2  # GPA + credits
-        time_pref_dim = 3
-        day_pref_dim = 7
-        subject_history_dim = 160  # All subjects
-        search_features_dim = 20
-        filter_dim = 10
-        behavioral_dim = 3
-
-        return (major_dim + classification_dim + continuous_dim +
-                time_pref_dim + day_pref_dim + subject_history_dim +
-                search_features_dim + filter_dim + behavioral_dim)
-
-    def _get_all_subjects(self) -> List[str]:
-        """Get list of all subject codes"""
-        from subjects import subjects
-        return subjects
-
-    def _get_common_majors(self) -> List[str]:
-        """Get list of common majors"""
-        from majors import majors
-        return majors
-
-    def _create_course_actions(self) -> List[CourseAction]:
-        """Create list of possible course actions from available courses"""
-        actions = []
-
-        # Create actions from actual course data
-        # Limit to first 100 for performance
-        for course in self.available_courses[:100]:
-            actions.append(CourseAction(
-                course_subject=course.get('subject_id', ''),
-                course_number=course.get('course_number', ''),
-                course_title=course.get('title', ''),
-                credits=str(course.get('credits', '3')),
-                college_code=course.get('college_id', ''),
-                section_info={
-                    'crn': course.get('crn', ''),
-                    'section': course.get('section', ''),
-                    'days': course.get('days', []),
-                    'start_time': course.get('start_time', ''),
-                    'end_time': course.get('end_time', ''),
-                    'instructors': course.get('instructors', [])
-                }
-            ))
-
-        return actions
-
-    def _encode_context(self, context: StudentContext) -> np.ndarray:
-        """
-        Encode student context into feature vector.
-
-        Args:
-            context: Student context object
-
-        Returns:
-            Encoded context vector
-        """
-        features = []
-
-        # Major (one-hot)
-        major_vec = np.zeros(50)
-        if context.major in self.major_to_idx:
-            major_vec[self.major_to_idx[context.major]] = 1
-        features.extend(major_vec)
-
-        # Classification level (one-hot)
-        classification_vec = np.zeros(5)
-        # Handle both enum instances and integer values
-        if isinstance(context.classification, ClassificationLevel):
-            classification_idx = context.classification.value
-        else:
-            classification_idx = int(context.classification)
-        classification_vec[classification_idx] = 1
-        features.extend(classification_vec)
-
-        # Continuous features (normalized)
-        features.append(context.current_gpa / 4.0)  # Normalize GPA
-        # Normalize credits
-        features.append(min(context.credits_completed / 150.0, 1.0))
-
-        # Time preference (one-hot)
-        time_prefs = ['morning', 'afternoon', 'evening']
-        time_vec = np.zeros(3)
-        if context.time_preference in time_prefs:
-            time_vec[time_prefs.index(context.time_preference)] = 1
-        features.extend(time_vec)
-
-        # Day preferences (binary)
-        all_days = ['Monday', 'Tuesday', 'Wednesday',
-                    'Thursday', 'Friday', 'Saturday', 'Sunday']
-        day_vec = [1 if day in context.preferred_days else 0 for day in all_days]
-        features.extend(day_vec)
-
-        # Previous courses (binary vector for subjects)
-        all_subjects = self._get_all_subjects()
-        subject_vec = np.zeros(len(all_subjects))
-        for course in context.previous_courses:
-            if course in self.subject_to_idx:
-                subject_vec[self.subject_to_idx[course]] = 1
-
-        # Pad or truncate to expected size
-        if len(subject_vec) < 160:
-            subject_vec = np.pad(subject_vec, (0, 160 - len(subject_vec)))
-        else:
-            subject_vec = subject_vec[:160]
-        features.extend(subject_vec)
-
-        # Search features (simplified TF-IDF style)
-        search_vec = np.zeros(20)
-        if context.current_search_text:
-            # Simple hash-based features for search text
-            for i, word in enumerate(context.current_search_text.lower().split()[:20]):
-                # Simple word importance
-                search_vec[i % 20] += len(word) / 10.0
-        features.extend(search_vec)
-
-        # Active filters (binary)
-        common_filters = ['morning', 'afternoon', 'evening', 'monday', 'tuesday',
-                          'wednesday', 'thursday', 'friday', 'online', 'in-person']
-        filter_vec = [
-            1 if f in context.active_filters else 0 for f in common_filters]
-        features.extend(filter_vec)
-
-        # Behavioral signals
-        # Normalize hover count
-        features.append(min(len(context.session_hovers) / 10.0, 1.0))
-        # Normalize watchlist
-        features.append(min(len(context.session_watchlisted) / 5.0, 1.0))
-        # Normalize pagination
-        features.append(min(context.session_paginations / 10.0, 1.0))
-
-        # Ensure correct dimension
-        feature_array = np.array(features)
-        if len(feature_array) < self.context_dim:
-            feature_array = np.pad(
-                feature_array, (0, self.context_dim - len(feature_array)))
-        else:
-            feature_array = feature_array[:self.context_dim]
-
-        return feature_array
-
-    def predict_rewards(self, context: StudentContext) -> np.ndarray:
-        """Predict expected rewards for all course actions given context."""
-        context_vec = self._encode_context(context)
-        return np.dot(self.weights, context_vec)
-
-    def select_courses(self, context: StudentContext, n_recommendations: int = 5) -> List[int]:
-        """
-        Select top N course recommendations using epsilon-greedy policy.
-
-        Args:
-            context: Student context
-            n_recommendations: Number of courses to recommend
-
-        Returns:
-            List of course action indices
-        """
-        n_recommendations = min(n_recommendations, self.n_actions)
-
-        if np.random.random() < self.epsilon:
-            # Explore: random courses
-            return np.random.choice(self.n_actions, size=n_recommendations, replace=False).tolist()
-        else:
-            # Exploit: top predicted courses
-            predicted_rewards = self.predict_rewards(context)
-            return np.argsort(predicted_rewards)[-n_recommendations:].tolist()
-
-    def update(self, context: StudentContext, recommended_courses: List[int],
-               rewards: List[float]):
-        """
-        Update the model based on observed rewards.
-
-        Args:
-            context: Student context
-            recommended_courses: List of course indices that were recommended
-            rewards: List of rewards for each recommended course
-        """
-        context_vec = self._encode_context(context)
-
-        for course_idx, reward in zip(recommended_courses, rewards):
-            # Predict current reward for the course
-            predicted_reward = np.dot(self.weights[course_idx], context_vec)
-
-            # Calculate prediction error
-            error = reward - predicted_reward
-
-            # Update weights using gradient descent
-            self.weights[course_idx] += self.learning_rate * \
-                error * context_vec
-
-            # Update statistics
-            self.total_reward += reward
-            self.action_counts[course_idx] += 1
-
-        self.n_steps += 1
-        self.reward_history.extend(rewards)
-
-        # Decay epsilon
-        self.epsilon *= self.epsilon_decay
-
-    def calculate_reward(self, context: StudentContext, course_idx: int,
-                         user_action: str) -> float:
-        """
-        Calculate reward based on user interaction with recommended course.
-
-        Args:
-            context: Student context
-            course_idx: Index of recommended course
-            user_action: Type of user action ('hover', 'watchlist', 'click', 'enroll', 'pagination')
-
-        Returns:
-            Calculated reward
-        """
-        base_reward = 0.0
-        course = self.course_actions[course_idx]
-
-        # Positive rewards
-        if user_action == 'hover':
-            base_reward = 0.1  # Small positive signal
-        elif user_action == 'watchlist':
-            base_reward = 0.5  # Strong positive signal
-        elif user_action == 'click':
-            base_reward = 0.3  # Moderate positive signal
-
-        # Negative rewards
-        elif user_action == 'pagination':
-            base_reward = -0.1  # User went to next page without interacting
-
-        # Contextual adjustments
-        if course.course_subject in context.previous_courses:
-            base_reward *= 0.8  # Slight penalty for recommending same subject
-
-        if course.course_subject.lower() in context.current_search_text.lower():
-            base_reward *= 1.2  # Bonus for matching search intent
-
-        return base_reward
-
-    def get_recommendation_explanation(self, context: StudentContext,
-                                       course_idx: int) -> str:
-        """Generate explanation for why a course was recommended."""
-        course = self.course_actions[course_idx]
-        context_vec = self._encode_context(context)
-        predicted_reward = np.dot(self.weights[course_idx], context_vec)
-
-        explanations = []
-
-        if course.course_subject in context.previous_courses:
-            explanations.append(f"builds on your experience with {
-                                course.course_subject}")
-
-        if course.course_subject.lower() in context.current_search_text.lower():
-            explanations.append("matches your search criteria")
-
-        if isinstance(context.classification, ClassificationLevel):
-            classification = context.classification
-        else:
-            classification = ClassificationLevel(context.classification)
-
-        if classification in [ClassificationLevel.FRESHMAN, ClassificationLevel.SOPHOMORE]:
-            explanations.append("suitable for your academic level")
-
-        if predicted_reward > 0.5:
-            explanations.append("highly recommended based on your profile")
-
-        if not explanations:
-            explanations.append("recommended based on your academic profile")
-
-        return f"This course is {' and '.join(explanations)}."
-
-
-def create_sample_context() -> StudentContext:
-    """Create a sample student context for testing."""
-    return StudentContext(
-        major="Computer Science (BS)",
-        classification=ClassificationLevel.SOPHOMORE,
-        previous_courses=["MATH", "PHYS", "ENGL"],
-        current_gpa=3.2,
-        credits_completed=45,
-        time_preference="morning",
-        preferred_days=["Monday", "Wednesday", "Friday"],
-        current_search_text="programming algorithms",
-        active_filters=["morning", "in-person"],
-        session_hovers=["CS", "MATH"],
-        session_watchlisted=["CS"],
-        session_paginations=2
+import time
+from pathlib import Path
+from typing import List, Dict, Tuple
+import seaborn as sns
+
+# Import your modules (adjust paths as needed)
+from model import (
+    StudentContext, CourseRecommendationBandit,
+    ClassificationLevel, create_sample_context
+)
+from interaction import InteractionGenerator, UserInteraction, InteractionType
+from eval import (
+    ComprehensiveEvaluationSuite, OnlineEvaluator, OfflineEvaluator,
+    SimulationEvaluator, CrossValidationEvaluator, EvaluationMetrics
+)
+
+
+# Mock course data for demonstration
+MOCK_COURSES = [
+    {
+        'subject_id': 'CS', 'course_number': '101', 'title': 'Intro to Programming',
+        'credits': 3, 'college_id': 'ENGR', 'crn': '12345', 'section': '001',
+        'days': ['Monday', 'Wednesday', 'Friday'], 'start_time': '09:00',
+        'end_time': '10:00', 'instructors': ['Dr. Smith']
+    },
+    {
+        'subject_id': 'CS', 'course_number': '201', 'title': 'Data Structures',
+        'credits': 3, 'college_id': 'ENGR', 'crn': '12346', 'section': '001',
+        'days': ['Tuesday', 'Thursday'], 'start_time': '14:00',
+        'end_time': '15:30', 'instructors': ['Dr. Johnson']
+    },
+    {
+        'subject_id': 'MATH', 'course_number': '151', 'title': 'Calculus I',
+        'credits': 4, 'college_id': 'ARTS', 'crn': '12347', 'section': '001',
+        'days': ['Monday', 'Wednesday', 'Friday'], 'start_time': '11:00',
+        'end_time': '12:00', 'instructors': ['Dr. Brown']
+    },
+    {
+        'subject_id': 'PHYS', 'course_number': '201', 'title': 'Physics I',
+        'credits': 4, 'college_id': 'ARTS', 'crn': '12348', 'section': '001',
+        'days': ['Tuesday', 'Thursday'], 'start_time': '10:00',
+        'end_time': '11:30', 'instructors': ['Dr. Wilson']
+    },
+    {
+        'subject_id': 'ENGL', 'course_number': '101', 'title': 'Composition I',
+        'credits': 3, 'college_id': 'ARTS', 'crn': '12349', 'section': '001',
+        'days': ['Monday', 'Wednesday'], 'start_time': '13:00',
+        'end_time': '14:30', 'instructors': ['Prof. Davis']
+    }
+] * 20  # Replicate to have more courses for testing
+
+
+def create_diverse_student_contexts(n_students: int = 100) -> List[StudentContext]:
+    """Create a diverse set of student contexts for testing"""
+    np.random.seed(42)
+    students = []
+
+    # Use exactly the same majors as defined in the mock module
+    majors = [
+        "Computer Science (BS)", "Mathematics (BS)", "Physics (BS)",
+        "Engineering (BS)", "Biology (BS)", "Chemistry (BS)",
+        "English (BA)", "Psychology (BS)", "Business (BS)"
+    ]
+
+    subjects_by_major = {
+        "Computer Science (BS)": ["CS", "MATH", "ENGR"],
+        "Mathematics (BS)": ["MATH", "PHYS", "CS"],
+        "Physics (BS)": ["PHYS", "MATH", "ENGR"],
+        "Engineering (BS)": ["ENGR", "MATH", "PHYS"],
+        "Biology (BS)": ["BIOL", "CHEM", "MATH"],
+        "Chemistry (BS)": ["CHEM", "MATH", "PHYS"],
+        "English (BA)": ["ENGL", "HIST", "PHIL"],
+        "Psychology (BS)": ["PSYC", "MATH", "BIOL"],
+        "Business (BS)": ["BUSI", "MATH", "ECON"]
+    }
+
+    search_terms_by_major = {
+        "Computer Science (BS)": ["programming", "algorithms", "software", "coding"],
+        "Mathematics (BS)": ["calculus", "algebra", "statistics", "analysis"],
+        "Physics (BS)": ["mechanics", "thermodynamics", "quantum", "waves"],
+        "Engineering (BS)": ["circuits", "mechanics", "design", "materials"],
+        "Biology (BS)": ["genetics", "ecology", "molecular", "anatomy"],
+        "Chemistry (BS)": ["organic", "inorganic", "analytical", "physical"],
+        "English (BA)": ["literature", "writing", "poetry", "rhetoric"],
+        "Psychology (BS)": ["cognitive", "behavioral", "development", "research"],
+        "Business (BS)": ["management", "finance", "marketing", "economics"]
+    }
+
+    for i in range(n_students):
+        major = np.random.choice(majors)
+        classification = ClassificationLevel(np.random.randint(0, 5))
+
+        # Previous courses based on major and classification
+        relevant_subjects = subjects_by_major.get(major, ["MATH", "ENGL"])
+        n_prev_courses = min(classification.value * 2, len(relevant_subjects))
+        previous_courses = np.random.choice(
+            relevant_subjects,
+            size=n_prev_courses,
+            replace=False
+        ).tolist() if n_prev_courses > 0 else []
+
+        # GPA tends to be higher for advanced students
+        base_gpa = 2.5 + classification.value * 0.2
+        gpa = np.clip(np.random.normal(base_gpa, 0.4),
+                      0.0, 4.0)  # Clamp to valid range
+
+        # Credits based on classification
+        base_credits = classification.value * 25
+        credits = base_credits + np.random.randint(-10, 15)
+
+        # Search terms relevant to major
+        search_options = search_terms_by_major.get(major, ["general"])
+        search_term = np.random.choice(search_options)
+
+        # Fix the choice selection for nested lists
+        day_options = [
+            ["Monday", "Wednesday", "Friday"],
+            ["Tuesday", "Thursday"],
+            ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        ]
+        selected_days = day_options[np.random.randint(0, len(day_options))]
+
+        filter_options = [
+            [], ["morning"], ["online"], ["morning", "online"]
+        ]
+        selected_filters = filter_options[np.random.randint(
+            0, len(filter_options))]
+
+        students.append(StudentContext(
+            major=major,
+            classification=classification,
+            previous_courses=previous_courses,
+            current_gpa=gpa,
+            credits_completed=max(0, credits),
+            time_preference=np.random.choice(
+                ["morning", "afternoon", "evening"]),
+            preferred_days=selected_days,
+            current_search_text=search_term,
+            active_filters=selected_filters,
+            session_hovers=[],
+            session_watchlisted=[],
+            session_paginations=0
+        ))
+
+    return students
+
+
+def create_bandit_variants() -> Dict[str, CourseRecommendationBandit]:
+    """Create different bandit configurations for A/B testing"""
+    variants = {}
+
+    # Standard bandit
+    variants['standard'] = CourseRecommendationBandit(
+        MOCK_COURSES, learning_rate=0.01, epsilon=0.15, epsilon_decay=0.995
     )
 
+    # High exploration bandit
+    variants['high_exploration'] = CourseRecommendationBandit(
+        MOCK_COURSES, learning_rate=0.01, epsilon=0.3, epsilon_decay=0.999
+    )
 
-# Example usage
+    # Fast learning bandit
+    variants['fast_learning'] = CourseRecommendationBandit(
+        MOCK_COURSES, learning_rate=0.05, epsilon=0.15, epsilon_decay=0.99
+    )
+
+    # Conservative bandit
+    variants['conservative'] = CourseRecommendationBandit(
+        MOCK_COURSES, learning_rate=0.005, epsilon=0.1, epsilon_decay=0.998
+    )
+
+    return variants
+
+
+def simulate_learning_process(bandit: CourseRecommendationBandit,
+                              generator: InteractionGenerator,
+                              n_sessions: int = 1000) -> Tuple[List[UserInteraction], List[float]]:
+    """Simulate the bandit learning process and track performance"""
+    interactions = []
+    reward_history = []
+
+    print(f"Simulating {n_sessions} learning sessions...")
+
+    for session_num, interaction in enumerate(generator.generate_interactions(n_sessions)):
+        interactions.append(interaction)
+
+        # Update bandit with interaction
+        if interaction.course_idx != -1:
+            bandit.update(
+                interaction.student_context,
+                [interaction.course_idx],
+                [interaction.reward]
+            )
+            reward_history.append(interaction.reward)
+
+        # Print progress
+        if (session_num + 1) % 200 == 0:
+            avg_reward = np.mean(
+                reward_history[-100:]) if len(reward_history) >= 100 else 0
+            print(f"  Session {session_num +
+                  1}: Recent avg reward = {avg_reward:.3f}")
+
+    return interactions, reward_history
+
+
+def run_ab_testing(variants: Dict[str, CourseRecommendationBandit],
+                   students: List[StudentContext]) -> Dict[str, EvaluationMetrics]:
+    """Run A/B testing between different bandit variants"""
+    print("\n" + "="*60)
+    print("RUNNING A/B TESTING")
+    print("="*60)
+
+    results = {}
+
+    for variant_name, bandit in variants.items():
+        print(f"\nTesting variant: {variant_name}")
+
+        # Create generator for this variant
+        generator = InteractionGenerator(bandit, seed=42)
+
+        # Simulate learning
+        interactions, _ = simulate_learning_process(
+            bandit, generator, n_sessions=500)
+
+        # Evaluate
+        evaluator = OnlineEvaluator(k=5)
+        metrics = evaluator.evaluate(bandit, interactions)
+        results[variant_name] = metrics
+
+        print(f"  Average reward: {metrics.average_reward:.4f}")
+        print(f"  Click-through rate: {metrics.click_through_rate:.4f}")
+        print(f"  Exploration rate: {metrics.exploration_rate:.4f}")
+
+    return results
+
+
+def run_comprehensive_evaluation(bandit: CourseRecommendationBandit,
+                                 interactions: List[UserInteraction],
+                                 generator: InteractionGenerator) -> Dict[str, EvaluationMetrics]:
+    """Run all evaluation methods"""
+    print("\n" + "="*60)
+    print("RUNNING COMPREHENSIVE EVALUATION")
+    print("="*60)
+
+    results = {}
+
+    # 1. Online Evaluation
+    print("\n1. Online Evaluation (using simulated interactions)")
+    online_eval = OnlineEvaluator(k=5)
+    results['online'] = online_eval.evaluate(bandit, interactions)
+    print(f"   Average reward: {results['online'].average_reward:.4f}")
+    print(f"   Regret: {results['online'].regret:.4f}")
+
+    # 2. Offline Evaluation
+    print("\n2. Offline Evaluation (IPS method)")
+    offline_eval = OfflineEvaluator(k=5)
+    results['offline'] = offline_eval.evaluate(bandit, interactions)
+    print(f"   Average reward: {results['offline'].average_reward:.4f}")
+
+    # 3. Simulation Evaluation
+    print("\n3. Simulation Evaluation (fresh synthetic data)")
+    sim_eval = SimulationEvaluator(generator, n_episodes=300, k=5)
+    results['simulation'] = sim_eval.evaluate(bandit)
+    print(f"   Average reward: {results['simulation'].average_reward:.4f}")
+    print(f"   Coverage: {results['simulation'].coverage:.4f}")
+
+    # 4. Cross-Validation
+    if len(interactions) > 100:
+        print("\n4. Cross-Validation (time-based splits)")
+        cv_eval = CrossValidationEvaluator(
+            n_folds=3, evaluator_class=OnlineEvaluator)
+        cv_results = cv_eval.evaluate(bandit, interactions)
+
+        # Average CV results
+        avg_metrics_dict = {}
+        for key in cv_results['fold_0'].to_dict().keys():
+            avg_metrics_dict[key] = np.mean([
+                cv_results[f'fold_{i}'].to_dict()[key] for i in range(3)
+            ])
+        results['cross_validation'] = EvaluationMetrics(**avg_metrics_dict)
+        print(f"   CV Average reward: {
+              results['cross_validation'].average_reward:.4f}")
+        print(f"   CV Std: {
+              np.std([cv_results[f'fold_{i}'].average_reward for i in range(3)]):.4f}")
+
+    return results
+
+
+def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
+                          eval_results: Dict[str, EvaluationMetrics],
+                          reward_history: List[float],
+                          save_dir: str = "evaluation_results"):
+    """Create comprehensive visualizations"""
+    Path(save_dir).mkdir(exist_ok=True)
+
+    # Set style
+    plt.style.use('default')
+    sns.set_palette("husl")
+
+    # 1. A/B Testing Results
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle(
+        'A/B Testing Results: Bandit Variants Comparison', fontsize=16)
+
+    variants = list(ab_results.keys())
+    metrics_to_plot = ['average_reward',
+                       'click_through_rate', 'exploration_rate', 'coverage']
+    metric_titles = ['Average Reward', 'Click-Through Rate',
+                     'Exploration Rate', 'Coverage']
+
+    for i, (metric, title) in enumerate(zip(metrics_to_plot, metric_titles)):
+        row, col = i // 2, i % 2
+        ax = axes[row, col]
+
+        values = [ab_results[variant].to_dict()[metric]
+                  for variant in variants]
+        bars = ax.bar(variants, values, alpha=0.8)
+        ax.set_title(title)
+        ax.set_ylabel('Value')
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+
+        # Add value labels
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
+                    f'{value:.3f}', ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/ab_testing_results.png",
+                dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 2. Evaluation Methods Comparison
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Evaluation Methods Comparison', fontsize=16)
+
+    eval_methods = list(eval_results.keys())
+    eval_metrics = ['average_reward', 'click_through_rate', 'precision_at_k',
+                    'coverage', 'diversity', 'exploration_rate']
+
+    for i, metric in enumerate(eval_metrics):
+        row, col = i // 3, i % 3
+        ax = axes[row, col]
+
+        values = [eval_results[method].to_dict()[metric]
+                  for method in eval_methods]
+        bars = ax.bar(eval_methods, values, alpha=0.8)
+        ax.set_title(metric.replace('_', ' ').title())
+        ax.set_ylabel('Value')
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+
+        # Add value labels
+        for bar, value in zip(bars, values):
+            if value > 0:  # Only show positive values
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
+                        f'{value:.3f}', ha='center', va='bottom', fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/evaluation_methods_comparison.png",
+                dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 3. Learning Curve
+    plt.figure(figsize=(12, 6))
+
+    # Moving average of rewards
+    window_size = 50
+    if len(reward_history) > window_size:
+        moving_avg = pd.Series(reward_history).rolling(
+            window=window_size).mean()
+        plt.plot(moving_avg, label=f'Moving Average (window={
+                 window_size})', linewidth=2)
+
+    plt.plot(reward_history, alpha=0.3, label='Raw Rewards')
+    plt.axhline(y=np.mean(reward_history), color='red', linestyle='--',
+                label=f'Overall Average ({np.mean(reward_history):.3f})')
+
+    plt.title('Bandit Learning Curve')
+    plt.xlabel('Interaction Number')
+    plt.ylabel('Reward')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.savefig(f"{save_dir}/learning_curve.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def save_results(ab_results: Dict[str, EvaluationMetrics],
+                 eval_results: Dict[str, EvaluationMetrics],
+                 save_dir: str = "evaluation_results"):
+    """Save results to JSON files"""
+    Path(save_dir).mkdir(exist_ok=True)
+
+    # Convert to serializable format
+    ab_data = {variant: metrics.to_dict()
+               for variant, metrics in ab_results.items()}
+    eval_data = {method: metrics.to_dict()
+                 for method, metrics in eval_results.items()}
+
+    with open(f"{save_dir}/ab_testing_results.json", 'w') as f:
+        json.dump(ab_data, f, indent=2)
+
+    with open(f"{save_dir}/evaluation_results.json", 'w') as f:
+        json.dump(eval_data, f, indent=2)
+
+    print(f"\nResults saved to {save_dir}/")
+
+
+def generate_report(ab_results: Dict[str, EvaluationMetrics],
+                    eval_results: Dict[str, EvaluationMetrics]) -> str:
+    """Generate comprehensive evaluation report"""
+
+    report = []
+    report.append("COURSE RECOMMENDATION BANDIT EVALUATION REPORT")
+    report.append("=" * 55)
+    report.append(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append("")
+
+    # A/B Testing Results
+    report.append("A/B TESTING RESULTS")
+    report.append("-" * 30)
+
+    best_variant = max(ab_results.items(), key=lambda x: x[1].average_reward)
+    report.append(f"Best performing variant: {best_variant[0]}")
+    report.append(f"Best average reward: {best_variant[1].average_reward:.4f}")
+    report.append("")
+
+    for variant, metrics in ab_results.items():
+        report.append(f"{variant.upper()}:")
+        report.append(f"  Average Reward: {metrics.average_reward:.4f}")
+        report.append(
+            f"  Click-Through Rate: {metrics.click_through_rate:.4f}")
+        report.append(f"  Exploration Rate: {metrics.exploration_rate:.4f}")
+        report.append(f"  Coverage: {metrics.coverage:.4f}")
+        report.append("")
+
+    # Evaluation Methods Results
+    report.append("EVALUATION METHODS COMPARISON")
+    report.append("-" * 35)
+
+    for method, metrics in eval_results.items():
+        report.append(f"{method.upper()}:")
+        report.append(f"  Average Reward: {metrics.average_reward:.4f}")
+        report.append(f"  Cumulative Reward: {metrics.cumulative_reward:.2f}")
+        report.append(
+            f"  Click-Through Rate: {metrics.click_through_rate:.4f}")
+        report.append(f"  Precision@K: {metrics.precision_at_k:.4f}")
+        report.append(f"  Coverage: {metrics.coverage:.4f}")
+        report.append(f"  Diversity: {metrics.diversity:.4f}")
+        report.append("")
+
+    # Recommendations
+    report.append("RECOMMENDATIONS")
+    report.append("-" * 20)
+
+    if best_variant[1].exploration_rate < 0.1:
+        report.append("⚠️  Consider increasing exploration rate")
+
+    if best_variant[1].coverage < 0.3:
+        report.append("⚠️  Low course coverage - diversify recommendations")
+
+    if best_variant[1].average_reward > 0.3:
+        report.append("✅ Good performance - consider production deployment")
+
+    report.append("")
+    report.append("END OF REPORT")
+
+    return "\n".join(report)
+
+
+def main():
+    """Main evaluation script"""
+    print("COURSE RECOMMENDATION BANDIT EVALUATION")
+    print("=" * 50)
+    print("This script runs comprehensive evaluation of the bandit system")
+    print("using simulation, offline methods, and A/B testing.\n")
+
+    # Create output directory
+    output_dir = "evaluation_results"
+    Path(output_dir).mkdir(exist_ok=True)
+
+    # 1. Setup
+    print("1. Setting up evaluation environment...")
+    students = create_diverse_student_contexts(n_students=150)
+    bandit_variants = create_bandit_variants()
+    print(f"   Created {len(students)} diverse student profiles")
+    print(f"   Created {len(bandit_variants)} bandit variants")
+
+    # 2. Run A/B Testing
+    ab_results = run_ab_testing(bandit_variants, students)
+
+    # 3. Select best variant for detailed evaluation
+    best_variant_name = max(
+        ab_results.items(), key=lambda x: x[1].average_reward)[0]
+    best_bandit = bandit_variants[best_variant_name]
+    print(f"\nBest variant: {best_variant_name}")
+
+    # 4. Generate interactions for detailed evaluation
+    print(f"\n4. Generating interactions for detailed evaluation...")
+    generator = InteractionGenerator(best_bandit, seed=42)
+    interactions, reward_history = simulate_learning_process(
+        best_bandit, generator, n_sessions=800)
+    print(f"   Generated {len(interactions)} total interactions")
+    print(f"   Average reward: {np.mean(reward_history):.4f}")
+
+    # 5. Run comprehensive evaluation
+    eval_results = run_comprehensive_evaluation(
+        best_bandit, interactions, generator)
+
+    # 6. Create visualizations
+    print(f"\n6. Creating visualizations...")
+    create_visualizations(ab_results, eval_results, reward_history, output_dir)
+
+    # 7. Save results
+    print(f"7. Saving results...")
+    save_results(ab_results, eval_results, output_dir)
+
+    # 8. Generate and display report
+    print(f"\n8. Generating evaluation report...")
+    report = generate_report(ab_results, eval_results)
+
+    # Save report
+    with open(f"{output_dir}/evaluation_report.txt", 'w') as f:
+        f.write(report)
+
+    # Display report
+    print("\n" + report)
+
+    # 9. Summary
+    print(f"\n{'='*50}")
+    print("EVALUATION COMPLETE")
+    print(f"{'='*50}")
+    print(f"Results saved to: {output_dir}/")
+    print("Files created:")
+    print("  - ab_testing_results.json")
+    print("  - evaluation_results.json")
+    print("  - ab_testing_results.png")
+    print("  - evaluation_methods_comparison.png")
+    print("  - learning_curve.png")
+    print("  - evaluation_report.txt")
+
+    # Performance summary
+    best_reward = max(
+        metrics.average_reward for metrics in ab_results.values())
+    print(f"\nBest average reward achieved: {best_reward:.4f}")
+    print(f"Total interactions simulated: {len(interactions)}")
+    print(f"Evaluation methods used: {len(eval_results)}")
+
+
 if __name__ == "__main__":
-    from section import courses
-    bandit = CourseRecommendationBandit(courses)
+    # Set random seeds for reproducibility
+    np.random.seed(42)
 
-    # Create sample context
-    student_context = create_sample_context()
+    # Add mock modules for missing imports
+    import sys
+    from types import ModuleType
 
-    # Get recommendations
-    recommended_courses = bandit.select_courses(
-        student_context, n_recommendations=2)
+    # Create mock subjects module
+    subjects_module = ModuleType('subjects')
+    subjects_module.subjects = [
+        'CS', 'MATH', 'PHYS', 'CHEM', 'BIOL', 'ENGL', 'HIST', 'PSYC',
+        'ENGR', 'BUSI', 'ECON', 'PHIL', 'ARTS', 'MUSC', 'THEA'
+    ] * 10  # Expand to ~160 subjects
+    sys.modules['subjects'] = subjects_module
 
-    print("Course Recommendations:")
-    for i, course_idx in enumerate(recommended_courses):
-        course = bandit.course_actions[course_idx]
-        explanation = bandit.get_recommendation_explanation(
-            student_context, course_idx)
-        print(
-            f"{i+1}. {course.course_subject} {course.course_number}: {course.course_title}")
-        print(f"   {explanation}")
+    # Create mock majors module - ensure first 9 match what we use in student generation
+    majors_module = ModuleType('majors')
+    used_majors = [
+        "Computer Science (BS)", "Mathematics (BS)", "Physics (BS)",
+        "Engineering (BS)", "Biology (BS)", "Chemistry (BS)",
+        "English (BA)", "Psychology (BS)", "Business (BS)"
+    ]
+    additional_majors = [
+        "Economics (BS)", "Philosophy (BA)", "History (BA)", "Art (BA)", "Music (BA)",
+        "Theatre (BA)", "Mechanical Engineering (BS)", "Electrical Engineering (BS)",
+        "Civil Engineering (BS)", "Chemical Engineering (BS)", "Biomedical Engineering (BS)",
+        "Accounting (BS)", "Finance (BS)", "Marketing (BS)", "Management (BS)",
+        "Political Science (BA)", "Sociology (BA)", "Anthropology (BA)",
+        "Environmental Science (BS)", "Geology (BS)", "Astronomy (BS)",
+        "Statistics (BS)", "Applied Mathematics (BS)", "Pure Mathematics (BS)",
+        "Molecular Biology (BS)", "Microbiology (BS)", "Biochemistry (BS)",
+        "Physical Chemistry (BS)", "Organic Chemistry (BS)", "Analytical Chemistry (BS)",
+        "Creative Writing (BA)", "Linguistics (BA)", "Comparative Literature (BA)",
+        "Clinical Psychology (BS)", "Social Psychology (BS)", "Cognitive Psychology (BS)",
+        "International Business (BS)", "Human Resources (BS)", "Operations Management (BS)",
+        "Public Administration (BA)", "Criminal Justice (BA)", "Social Work (BA)"
+    ]
+    majors_module.majors = used_majors + additional_majors
+    sys.modules['majors'] = majors_module
 
-    # Simulate user interactions and update
-    rewards = []
-    for course_idx in recommended_courses:
-        # Simulate different user actions
-        action = np.random.choice(['hover', 'watchlist', 'click', 'pagination'],
-                                  p=[0.4, 0.2, 0.3, 0.1])
-        reward = bandit.calculate_reward(student_context, course_idx, action)
-        rewards.append(reward)
-        print(f"User {action} on {
-              bandit.course_actions[course_idx].course_subject}: reward = {reward}")
+    # Create mock section module
+    section_module = ModuleType('section')
+    section_module.courses = MOCK_COURSES
+    sys.modules['section'] = section_module
 
-    # Update bandit
-    bandit.update(student_context, recommended_courses, rewards)
-
-    print(f"\nBandit updated. Current epsilon: {bandit.epsilon:.3f}")
-    print(f"Average reward: {np.mean(bandit.reward_history):.3f}")
+    # Run main evaluation
+    main()

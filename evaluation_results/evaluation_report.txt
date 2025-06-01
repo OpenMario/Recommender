@@ -1,0 +1,71 @@
+COURSE RECOMMENDATION BANDIT EVALUATION REPORT
+=======================================================
+Generated on: 2025-06-01 14:34:01
+
+A/B TESTING RESULTS
+------------------------------
+Best performing variant: standard
+Best average reward: 0.1600
+
+STANDARD:
+  Average Reward: 0.1600
+  Click-Through Rate: 0.1907
+  Exploration Rate: 0.2978
+  Coverage: 0.3000
+
+HIGH_EXPLORATION:
+  Average Reward: 0.1583
+  Click-Through Rate: 0.1765
+  Exploration Rate: 0.4987
+  Coverage: 0.8400
+
+FAST_LEARNING:
+  Average Reward: 0.1591
+  Click-Through Rate: 0.1911
+  Exploration Rate: 0.6362
+  Coverage: 0.4100
+
+CONSERVATIVE:
+  Average Reward: 0.1585
+  Click-Through Rate: 0.1872
+  Exploration Rate: 0.1837
+  Coverage: 0.3300
+
+EVALUATION METHODS COMPARISON
+-----------------------------------
+ONLINE:
+  Average Reward: 0.1632
+  Cumulative Reward: 589.65
+  Click-Through Rate: 0.1959
+  Precision@K: 0.3118
+  Coverage: 0.1800
+  Diversity: 0.0267
+
+OFFLINE:
+  Average Reward: 0.8158
+  Cumulative Reward: 2948.26
+  Click-Through Rate: 0.3118
+  Precision@K: 0.3118
+  Coverage: 0.0000
+  Diversity: 0.0000
+
+SIMULATION:
+  Average Reward: 0.1681
+  Cumulative Reward: 216.67
+  Click-Through Rate: 0.1870
+  Precision@K: 0.3103
+  Coverage: 0.1300
+  Diversity: 0.0267
+
+CROSS_VALIDATION:
+  Average Reward: 0.1632
+  Cumulative Reward: 196.55
+  Click-Through Rate: 0.1958
+  Precision@K: 0.3118
+  Coverage: 0.1667
+  Diversity: 0.0267
+
+RECOMMENDATIONS
+--------------------
+
+END OF REPORT

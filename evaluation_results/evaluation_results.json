@@ -1,0 +1,54 @@
+{
+  "online": {
+    "cumulative_reward": 589.6520000000176,
+    "average_reward": 0.1631577199778687,
+    "regret": 148.8080992847215,
+    "click_through_rate": 0.19590481460985057,
+    "watchlist_rate": 0.11593801881571665,
+    "coverage": 0.18,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.31184283342556723,
+    "recall_at_k": 0.31184283342556723,
+    "ndcg_at_k": 0.594253919423233,
+    "exploration_rate": 0.4164360819037078
+  },
+  "offline": {
+    "cumulative_reward": 2948.260000000001,
+    "average_reward": 0.8157885998893194,
+    "regret": 0.0,
+    "click_through_rate": 0.31184283342556723,
+    "watchlist_rate": 0.0,
+    "coverage": 0.0,
+    "diversity": 0.0,
+    "precision_at_k": 0.31184283342556723,
+    "recall_at_k": 0.0,
+    "ndcg_at_k": 0.0,
+    "exploration_rate": 0.0
+  },
+  "simulation": {
+    "cumulative_reward": 216.66800000000003,
+    "average_reward": 0.16808999224204813,
+    "regret": 47.96274805302585,
+    "click_through_rate": 0.186966640806827,
+    "watchlist_rate": 0.12335143522110163,
+    "coverage": 0.13,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.3103180760279286,
+    "recall_at_k": 0.3103180760279286,
+    "ndcg_at_k": 0.5855362938359756,
+    "exploration_rate": 0.019394879751745538
+  },
+  "cross_validation": {
+    "cumulative_reward": 196.55066666666664,
+    "average_reward": 0.16315340913734408,
+    "regret": 87.43350821537165,
+    "click_through_rate": 0.19583014116971462,
+    "watchlist_rate": 0.11595446295412881,
+    "coverage": 0.16666666666666666,
+    "diversity": 0.02666666666666667,
+    "precision_at_k": 0.31178460412384346,
+    "recall_at_k": 0.31178460412384346,
+    "ndcg_at_k": 0.5804566288378692,
+    "exploration_rate": 0.3933377589699895
+  }
+}
