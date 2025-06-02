@@ -46,7 +46,7 @@ def encodeProfile(profile):
   return tuple(major_vec + [year_norm] + interest_vec)
 
 def encode_major(major):
-    majors = ["cs", "math", "architecture", "biology"]  #TODO:connect to txt list
+    majors = ["cs", "me", "bio", "psy", "ee"]  #TODO:connect to txt list
     return majors.index(major.lower()) if major.lower() in majors else -1
 
 

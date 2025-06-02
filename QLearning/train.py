@@ -30,9 +30,9 @@ def train(num_episodes=15000, actions=15):
 
   student_profiles = [
     {"major": "CS", "year": 2},
-    {"major": "ME", "year": 1},
+    {"major": "cs", "year": 1},
     {"major": "BIO", "year": 3},
-    {"major": "PSY", "year": 4},
+    {"major": "cs", "year": 4},
     {"major": "EE", "year": 2},
   ]
 
