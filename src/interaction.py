@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 
-# Import from your existing code
+
 from model import (
     StudentContext, ClassificationLevel, CourseRecommendationBandit,
     CourseAction, create_sample_context
@@ -28,13 +28,13 @@ class UserInteraction:
     """Represents a single user interaction with the recommendation system"""
     session_id: str
     student_context: StudentContext
-    recommended_courses: List[int]  # Course indices
+    recommended_courses: List[int]
     interaction_type: InteractionType
-    # Which course was interacted with (-1 for session-level actions)
+
     course_idx: int
     timestamp: float
     reward: float
-    metadata: Dict = None  # Additional interaction data
+    metadata: Dict = None
 
 
 class InteractionGenerator:
@@ -48,7 +48,6 @@ class InteractionGenerator:
         self.rng = np.random.RandomState(seed)
         random.seed(seed)
 
-        # Interaction probabilities based on student characteristics
         self.base_interaction_probs = {
             InteractionType.HOVER: 0.6,
             InteractionType.CLICK: 0.25,
@@ -59,11 +58,10 @@ class InteractionGenerator:
             InteractionType.FILTER_CHANGE: 0.03
         }
 
-        # Factors that influence interaction likelihood
         self.gpa_multipliers = {
-            "high": 1.3,    # GPA >= 3.5
-            "medium": 1.0,  # 2.5 <= GPA < 3.5
-            "low": 0.7      # GPA < 2.5
+            "high": 1.3,
+            "medium": 1.0,
+            "low": 0.7
         }
 
         self.classification_multipliers = {
@@ -91,11 +89,9 @@ class InteractionGenerator:
         """
         base_prob = self.base_interaction_probs[interaction_type]
 
-        # GPA influence
         gpa_category = self._get_gpa_category(context.current_gpa)
         gpa_multiplier = self.gpa_multipliers[gpa_category]
 
-        # Classification level influence
         if isinstance(context.classification, ClassificationLevel):
             classification = context.classification
         else:
@@ -103,41 +99,36 @@ class InteractionGenerator:
 
         class_multiplier = self.classification_multipliers[classification]
 
-        # Course relevance (based on search and previous courses)
         relevance_multiplier = 1.0
 
-        # Higher interaction if course matches search
         if course.course_subject.lower() in context.current_search_text.lower():
             relevance_multiplier *= 1.5
 
-        # Higher interaction if building on previous courses
         if course.course_subject in context.previous_courses:
             relevance_multiplier *= 1.3
 
-        # Session behavior influence
         session_activity = len(context.session_hovers) + \
             len(context.session_watchlisted)
         activity_multiplier = 1.0 + (session_activity * 0.1)
 
-        # Interaction-specific adjustments
         if interaction_type == InteractionType.WATCHLIST:
-            # Less likely if already have many watchlisted
+
             if len(context.session_watchlisted) > 3:
                 relevance_multiplier *= 0.5
 
         elif interaction_type == InteractionType.PAGINATION:
-            # More likely if no interactions yet
+
             if session_activity == 0:
                 relevance_multiplier *= 2.0
 
         elif interaction_type == InteractionType.HOVER:
-            # More likely for engaged students
+
             if gpa_category == "high":
                 relevance_multiplier *= 1.2
 
         final_prob = base_prob * gpa_multiplier * class_multiplier * \
             relevance_multiplier * activity_multiplier
-        return min(final_prob, 1.0)  # Cap at 1.0
+        return min(final_prob, 1.0)
 
     def _generate_single_interaction(self, context: StudentContext,
                                      recommended_courses: List[int],
@@ -145,22 +136,20 @@ class InteractionGenerator:
                                      timestamp: float) -> UserInteraction:
         """Generate a single interaction for a recommendation session."""
 
-        # Determine interaction type
         interaction_probs = {}
         courses = [self.bandit.course_actions[idx]
                    for idx in recommended_courses]
 
-        # Calculate probabilities for each interaction type
         for interaction_type in InteractionType:
             if interaction_type in [InteractionType.PAGINATION,
                                     InteractionType.SEARCH_REFINEMENT,
                                     InteractionType.FILTER_CHANGE]:
-                # Session-level interactions
+
                 prob = self._calculate_interaction_probability(
                     context, courses[0], interaction_type)
                 interaction_probs[interaction_type] = prob
             else:
-                # Course-specific interactions (average across courses)
+
                 avg_prob = np.mean([
                     self._calculate_interaction_probability(
                         context, course, interaction_type)
@@ -168,11 +157,9 @@ class InteractionGenerator:
                 ])
                 interaction_probs[interaction_type] = avg_prob
 
-        # Select interaction type based on probabilities
         interaction_types = list(interaction_probs.keys())
         probabilities = list(interaction_probs.values())
 
-        # Normalize probabilities
         total_prob = sum(probabilities)
         if total_prob > 0:
             probabilities = [p / total_prob for p in probabilities]
@@ -182,12 +169,11 @@ class InteractionGenerator:
         selected_interaction = self.rng.choice(
             interaction_types, p=probabilities)
 
-        # Select which course to interact with (if applicable)
         course_idx = -1
         if selected_interaction not in [InteractionType.PAGINATION,
                                         InteractionType.SEARCH_REFINEMENT,
                                         InteractionType.FILTER_CHANGE]:
-            # Weight course selection by individual interaction probabilities
+
             course_probs = [
                 self._calculate_interaction_probability(
                     context, course, selected_interaction)
@@ -202,22 +188,20 @@ class InteractionGenerator:
             else:
                 course_idx = self.rng.choice(recommended_courses)
 
-        # Calculate reward
         if course_idx != -1:
             reward = self.bandit.calculate_reward(
                 context, course_idx, selected_interaction.value)
         else:
-            # Session-level rewards
+
             if selected_interaction == InteractionType.PAGINATION:
                 reward = -0.1
             elif selected_interaction == InteractionType.SEARCH_REFINEMENT:
-                reward = 0.05  # Slight positive for engagement
+                reward = 0.05
             elif selected_interaction == InteractionType.FILTER_CHANGE:
                 reward = 0.02
             else:
                 reward = 0.0
 
-        # Generate metadata
         metadata = {
             "interaction_probabilities": interaction_probs,
             "gpa_category": self._get_gpa_category(context.current_gpa),
@@ -251,36 +235,31 @@ class InteractionGenerator:
         if session_id is None:
             session_id = f"session_{self.rng.randint(10000, 99999)}"
 
-        # Get initial recommendations
         recommended_courses = self.bandit.select_courses(
             context, n_recommendations)
 
         interactions = []
         timestamp = 0.0
 
-        # Generate interactions until session ends
         for i in range(max_interactions):
             interaction = self._generate_single_interaction(
                 context, recommended_courses, session_id, timestamp
             )
             interactions.append(interaction)
 
-            # Update context based on interaction
             context = self._update_context_from_interaction(
                 context, interaction)
 
-            # Check for session ending conditions
             if interaction.interaction_type == InteractionType.PAGINATION:
-                if self.rng.random() < 0.3:  # 30% chance to end session after pagination
+                if self.rng.random() < 0.3:
                     break
             elif interaction.interaction_type == InteractionType.WATCHLIST:
-                if self.rng.random() < 0.4:  # 40% chance to end after watchlisting
+                if self.rng.random() < 0.4:
                     break
             elif len(interactions) >= 3 and self.rng.random() < 0.2:
-                # Random chance to end session
+
                 break
 
-            # Seconds between interactions
             timestamp += self.rng.exponential(30.0)
 
         return interactions
@@ -288,7 +267,7 @@ class InteractionGenerator:
     def _update_context_from_interaction(self, context: StudentContext,
                                          interaction: UserInteraction) -> StudentContext:
         """Update student context based on their interaction."""
-        # Create a copy of the context
+
         new_context = StudentContext(
             major=context.major,
             classification=context.classification,
@@ -304,7 +283,6 @@ class InteractionGenerator:
             session_paginations=context.session_paginations
         )
 
-        # Update based on interaction type
         if interaction.interaction_type == InteractionType.HOVER and interaction.course_idx != -1:
             course = self.bandit.course_actions[interaction.course_idx]
             if course.course_subject not in new_context.session_hovers:
@@ -319,7 +297,7 @@ class InteractionGenerator:
             new_context.session_paginations += 1
 
         elif interaction.interaction_type == InteractionType.SEARCH_REFINEMENT:
-            # Modify search text slightly
+
             search_terms = ["advanced", "intro",
                             "programming", "theory", "lab", "online"]
             new_term = self.rng.choice(search_terms)
@@ -327,15 +305,15 @@ class InteractionGenerator:
                 context.current_search_text} {new_term}".strip()
 
         elif interaction.interaction_type == InteractionType.FILTER_CHANGE:
-            # Add/remove a filter
+
             available_filters = ["morning", "afternoon",
                                  "evening", "online", "in-person"]
             if self.rng.random() < 0.5 and new_context.active_filters:
-                # Remove a filter
+
                 filter_to_remove = self.rng.choice(new_context.active_filters)
                 new_context.active_filters.remove(filter_to_remove)
             else:
-                # Add a filter
+
                 available = [
                     f for f in available_filters if f not in new_context.active_filters]
                 if available:
@@ -357,20 +335,18 @@ class InteractionGenerator:
             Individual UserInteraction objects
         """
         if students_pool is None:
-            # Create a diverse pool of student contexts
+
             students_pool = self._create_diverse_student_pool(50)
 
         for session_num in range(n_sessions):
-            # Select a random student
+
             student = self.rng.choice(students_pool)
 
-            # Generate interactions for this session
             session_interactions = self.generate_session_interactions(
                 student,
                 session_id=f"session_{session_num:04d}"
             )
 
-            # Yield each interaction
             for interaction in session_interactions:
                 yield interaction
 
@@ -382,7 +358,7 @@ class InteractionGenerator:
                   "Engineering (BS)", "Biology (BS)", "Chemistry (BS)", "English (BA)"]
 
         for i in range(n_students):
-            # Fix nested list selection issues
+
             course_options = [
                 ["MATH", "PHYS"],
                 ["ENGL", "HIST"],
@@ -413,7 +389,7 @@ class InteractionGenerator:
                 major=self.rng.choice(majors),
                 classification=ClassificationLevel(self.rng.randint(0, 5)),
                 previous_courses=previous_courses,
-                # Clamp GPA to valid range
+
                 current_gpa=np.clip(self.rng.normal(3.0, 0.5), 0.0, 4.0),
                 credits_completed=self.rng.randint(0, 120),
                 time_preference=self.rng.choice(
@@ -432,21 +408,12 @@ class InteractionGenerator:
         return students
 
 
-# Example usage and testing
 def demo_interaction_generator():
     """Demonstrate the interaction generator."""
-    # This would need the actual courses data
-    # For demo purposes, we'll create a minimal setup
 
     print("Course Recommendation Interaction Generator Demo")
     print("=" * 50)
 
-    # Note: This would need actual course data to run
-    # from section import courses
-    # bandit = CourseRecommendationBandit(courses)
-    # generator = InteractionGenerator(bandit)
-
-    # For now, just show the structure
     print("Interaction Types Available:")
     for interaction_type in InteractionType:
         print(f"  - {interaction_type.value}")
@@ -457,7 +424,6 @@ def demo_interaction_generator():
           sample_context.current_gpa}")
     print(f"Search: '{sample_context.current_search_text}'")
 
-    # Show what an interaction would look like
     sample_interaction = UserInteraction(
         session_id="demo_session",
         student_context=sample_context,

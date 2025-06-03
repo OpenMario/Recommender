@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Complete Bandit Evaluation Main Script
 
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import seaborn as sns
 
-# Import your modules (adjust paths as needed)
+
 from model import (
     StudentContext, CourseRecommendationBandit,
     ClassificationLevel, create_sample_context
@@ -34,7 +34,6 @@ from eval import (
 )
 
 
-# Mock course data for demonstration
 MOCK_COURSES = [
     {
         'subject_id': 'CS', 'course_number': '101', 'title': 'Intro to Programming',
@@ -66,7 +65,7 @@ MOCK_COURSES = [
         'days': ['Monday', 'Wednesday'], 'start_time': '13:00',
         'end_time': '14:30', 'instructors': ['Prof. Davis']
     }
-] * 20  # Replicate to have more courses for testing
+] * 20
 
 
 def create_diverse_student_contexts(n_students: int = 100) -> List[StudentContext]:
@@ -74,7 +73,6 @@ def create_diverse_student_contexts(n_students: int = 100) -> List[StudentContex
     np.random.seed(42)
     students = []
 
-    # Use exactly the same majors as defined in the mock module
     majors = [
         "Computer Science (BS)", "Mathematics (BS)", "Physics (BS)",
         "Engineering (BS)", "Biology (BS)", "Chemistry (BS)",
@@ -109,7 +107,6 @@ def create_diverse_student_contexts(n_students: int = 100) -> List[StudentContex
         major = np.random.choice(majors)
         classification = ClassificationLevel(np.random.randint(0, 5))
 
-        # Previous courses based on major and classification
         relevant_subjects = subjects_by_major.get(major, ["MATH", "ENGL"])
         n_prev_courses = min(classification.value * 2, len(relevant_subjects))
         previous_courses = np.random.choice(
@@ -118,20 +115,16 @@ def create_diverse_student_contexts(n_students: int = 100) -> List[StudentContex
             replace=False
         ).tolist() if n_prev_courses > 0 else []
 
-        # GPA tends to be higher for advanced students
         base_gpa = 2.5 + classification.value * 0.2
         gpa = np.clip(np.random.normal(base_gpa, 0.4),
-                      0.0, 4.0)  # Clamp to valid range
+                      0.0, 4.0)
 
-        # Credits based on classification
         base_credits = classification.value * 25
         credits = base_credits + np.random.randint(-10, 15)
 
-        # Search terms relevant to major
         search_options = search_terms_by_major.get(major, ["general"])
         search_term = np.random.choice(search_options)
 
-        # Fix the choice selection for nested lists
         day_options = [
             ["Monday", "Wednesday", "Friday"],
             ["Tuesday", "Thursday"],
@@ -168,22 +161,18 @@ def create_bandit_variants() -> Dict[str, CourseRecommendationBandit]:
     """Create different bandit configurations for A/B testing"""
     variants = {}
 
-    # Standard bandit
     variants['standard'] = CourseRecommendationBandit(
         MOCK_COURSES, learning_rate=0.01, epsilon=0.15, epsilon_decay=0.995
     )
 
-    # High exploration bandit
     variants['high_exploration'] = CourseRecommendationBandit(
         MOCK_COURSES, learning_rate=0.01, epsilon=0.3, epsilon_decay=0.999
     )
 
-    # Fast learning bandit
     variants['fast_learning'] = CourseRecommendationBandit(
         MOCK_COURSES, learning_rate=0.05, epsilon=0.15, epsilon_decay=0.99
     )
 
-    # Conservative bandit
     variants['conservative'] = CourseRecommendationBandit(
         MOCK_COURSES, learning_rate=0.005, epsilon=0.1, epsilon_decay=0.998
     )
@@ -203,7 +192,6 @@ def simulate_learning_process(bandit: CourseRecommendationBandit,
     for session_num, interaction in enumerate(generator.generate_interactions(n_sessions)):
         interactions.append(interaction)
 
-        # Update bandit with interaction
         if interaction.course_idx != -1:
             bandit.update(
                 interaction.student_context,
@@ -212,7 +200,6 @@ def simulate_learning_process(bandit: CourseRecommendationBandit,
             )
             reward_history.append(interaction.reward)
 
-        # Print progress
         if (session_num + 1) % 200 == 0:
             avg_reward = np.mean(
                 reward_history[-100:]) if len(reward_history) >= 100 else 0
@@ -234,14 +221,11 @@ def run_ab_testing(variants: Dict[str, CourseRecommendationBandit],
     for variant_name, bandit in variants.items():
         print(f"\nTesting variant: {variant_name}")
 
-        # Create generator for this variant
         generator = InteractionGenerator(bandit, seed=42)
 
-        # Simulate learning
         interactions, _ = simulate_learning_process(
             bandit, generator, n_sessions=500)
 
-        # Evaluate
         evaluator = OnlineEvaluator(k=5)
         metrics = evaluator.evaluate(bandit, interactions)
         results[variant_name] = metrics
@@ -263,34 +247,29 @@ def run_comprehensive_evaluation(bandit: CourseRecommendationBandit,
 
     results = {}
 
-    # 1. Online Evaluation
     print("\n1. Online Evaluation (using simulated interactions)")
     online_eval = OnlineEvaluator(k=5)
     results['online'] = online_eval.evaluate(bandit, interactions)
     print(f"   Average reward: {results['online'].average_reward:.4f}")
     print(f"   Regret: {results['online'].regret:.4f}")
 
-    # 2. Offline Evaluation
     print("\n2. Offline Evaluation (IPS method)")
     offline_eval = OfflineEvaluator(k=5)
     results['offline'] = offline_eval.evaluate(bandit, interactions)
     print(f"   Average reward: {results['offline'].average_reward:.4f}")
 
-    # 3. Simulation Evaluation
     print("\n3. Simulation Evaluation (fresh synthetic data)")
     sim_eval = SimulationEvaluator(generator, n_episodes=300, k=5)
     results['simulation'] = sim_eval.evaluate(bandit)
     print(f"   Average reward: {results['simulation'].average_reward:.4f}")
     print(f"   Coverage: {results['simulation'].coverage:.4f}")
 
-    # 4. Cross-Validation
     if len(interactions) > 100:
         print("\n4. Cross-Validation (time-based splits)")
         cv_eval = CrossValidationEvaluator(
             n_folds=3, evaluator_class=OnlineEvaluator)
         cv_results = cv_eval.evaluate(bandit, interactions)
 
-        # Average CV results
         avg_metrics_dict = {}
         for key in cv_results['fold_0'].to_dict().keys():
             avg_metrics_dict[key] = np.mean([
@@ -312,11 +291,9 @@ def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
     """Create comprehensive visualizations"""
     Path(save_dir).mkdir(exist_ok=True)
 
-    # Set style
     plt.style.use('default')
     sns.set_palette("husl")
 
-    # 1. A/B Testing Results
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle(
         'A/B Testing Results: Bandit Variants Comparison', fontsize=16)
@@ -338,7 +315,6 @@ def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
         ax.set_ylabel('Value')
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
-        # Add value labels
         for bar, value in zip(bars, values):
             ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
                     f'{value:.3f}', ha='center', va='bottom', fontsize=9)
@@ -348,7 +324,6 @@ def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
                 dpi=300, bbox_inches='tight')
     plt.show()
 
-    # 2. Evaluation Methods Comparison
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('Evaluation Methods Comparison', fontsize=16)
 
@@ -367,9 +342,8 @@ def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
         ax.set_ylabel('Value')
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
-        # Add value labels
         for bar, value in zip(bars, values):
-            if value > 0:  # Only show positive values
+            if value > 0:
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
                         f'{value:.3f}', ha='center', va='bottom', fontsize=8)
 
@@ -378,10 +352,8 @@ def create_visualizations(ab_results: Dict[str, EvaluationMetrics],
                 dpi=300, bbox_inches='tight')
     plt.show()
 
-    # 3. Learning Curve
     plt.figure(figsize=(12, 6))
 
-    # Moving average of rewards
     window_size = 50
     if len(reward_history) > window_size:
         moving_avg = pd.Series(reward_history).rolling(
@@ -408,7 +380,6 @@ def save_results(ab_results: Dict[str, EvaluationMetrics],
     """Save results to JSON files"""
     Path(save_dir).mkdir(exist_ok=True)
 
-    # Convert to serializable format
     ab_data = {variant: metrics.to_dict()
                for variant, metrics in ab_results.items()}
     eval_data = {method: metrics.to_dict()
@@ -433,7 +404,6 @@ def generate_report(ab_results: Dict[str, EvaluationMetrics],
     report.append(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     report.append("")
 
-    # A/B Testing Results
     report.append("A/B TESTING RESULTS")
     report.append("-" * 30)
 
@@ -451,7 +421,6 @@ def generate_report(ab_results: Dict[str, EvaluationMetrics],
         report.append(f"  Coverage: {metrics.coverage:.4f}")
         report.append("")
 
-    # Evaluation Methods Results
     report.append("EVALUATION METHODS COMPARISON")
     report.append("-" * 35)
 
@@ -466,7 +435,6 @@ def generate_report(ab_results: Dict[str, EvaluationMetrics],
         report.append(f"  Diversity: {metrics.diversity:.4f}")
         report.append("")
 
-    # Recommendations
     report.append("RECOMMENDATIONS")
     report.append("-" * 20)
 
@@ -492,27 +460,22 @@ def main():
     print("This script runs comprehensive evaluation of the bandit system")
     print("using simulation, offline methods, and A/B testing.\n")
 
-    # Create output directory
     output_dir = "evaluation_results"
     Path(output_dir).mkdir(exist_ok=True)
 
-    # 1. Setup
     print("1. Setting up evaluation environment...")
     students = create_diverse_student_contexts(n_students=150)
     bandit_variants = create_bandit_variants()
     print(f"   Created {len(students)} diverse student profiles")
     print(f"   Created {len(bandit_variants)} bandit variants")
 
-    # 2. Run A/B Testing
     ab_results = run_ab_testing(bandit_variants, students)
 
-    # 3. Select best variant for detailed evaluation
     best_variant_name = max(
         ab_results.items(), key=lambda x: x[1].average_reward)[0]
     best_bandit = bandit_variants[best_variant_name]
     print(f"\nBest variant: {best_variant_name}")
 
-    # 4. Generate interactions for detailed evaluation
     print(f"\n4. Generating interactions for detailed evaluation...")
     generator = InteractionGenerator(best_bandit, seed=42)
     interactions, reward_history = simulate_learning_process(
@@ -520,30 +483,23 @@ def main():
     print(f"   Generated {len(interactions)} total interactions")
     print(f"   Average reward: {np.mean(reward_history):.4f}")
 
-    # 5. Run comprehensive evaluation
     eval_results = run_comprehensive_evaluation(
         best_bandit, interactions, generator)
 
-    # 6. Create visualizations
     print(f"\n6. Creating visualizations...")
     create_visualizations(ab_results, eval_results, reward_history, output_dir)
 
-    # 7. Save results
     print(f"7. Saving results...")
     save_results(ab_results, eval_results, output_dir)
 
-    # 8. Generate and display report
     print(f"\n8. Generating evaluation report...")
     report = generate_report(ab_results, eval_results)
 
-    # Save report
     with open(f"{output_dir}/evaluation_report.txt", 'w') as f:
         f.write(report)
 
-    # Display report
     print("\n" + report)
 
-    # 9. Summary
     print(f"\n{'='*50}")
     print("EVALUATION COMPLETE")
     print(f"{'='*50}")
@@ -556,7 +512,6 @@ def main():
     print("  - learning_curve.png")
     print("  - evaluation_report.txt")
 
-    # Performance summary
     best_reward = max(
         metrics.average_reward for metrics in ab_results.values())
     print(f"\nBest average reward achieved: {best_reward:.4f}")
@@ -565,22 +520,19 @@ def main():
 
 
 if __name__ == "__main__":
-    # Set random seeds for reproducibility
+
     np.random.seed(42)
 
-    # Add mock modules for missing imports
     import sys
     from types import ModuleType
 
-    # Create mock subjects module
     subjects_module = ModuleType('subjects')
     subjects_module.subjects = [
         'CS', 'MATH', 'PHYS', 'CHEM', 'BIOL', 'ENGL', 'HIST', 'PSYC',
         'ENGR', 'BUSI', 'ECON', 'PHIL', 'ARTS', 'MUSC', 'THEA'
-    ] * 10  # Expand to ~160 subjects
+    ] * 10
     sys.modules['subjects'] = subjects_module
 
-    # Create mock majors module - ensure first 9 match what we use in student generation
     majors_module = ModuleType('majors')
     used_majors = [
         "Computer Science (BS)", "Mathematics (BS)", "Physics (BS)",
@@ -605,10 +557,8 @@ if __name__ == "__main__":
     majors_module.majors = used_majors + additional_majors
     sys.modules['majors'] = majors_module
 
-    # Create mock section module
     section_module = ModuleType('section')
     section_module.courses = MOCK_COURSES
     sys.modules['section'] = section_module
 
-    # Run main evaluation
     main()

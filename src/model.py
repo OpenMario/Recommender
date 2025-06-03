@@ -96,24 +96,19 @@ class CourseRecommendationBandit:
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
 
-        # Define context feature dimensions
         self.context_dim = self._calculate_context_dimension()
 
-        # We'll treat each unique course as an action
         self.course_actions = self._create_course_actions()
         self.n_actions = len(self.course_actions)
 
-        # Initialize weights for each course action
         self.weights = np.random.normal(
             0, 0.01, (self.n_actions, self.context_dim))
 
-        # Track statistics
         self.total_reward = 0
         self.n_steps = 0
         self.reward_history = []
         self.action_counts = np.zeros(self.n_actions)
 
-        # Subject mappings for encoding
         self.subject_to_idx = {subj: idx for idx,
                                subj in enumerate(self._get_all_subjects())}
         self.major_to_idx = {maj: idx for idx,
@@ -121,27 +116,13 @@ class CourseRecommendationBandit:
 
     def _calculate_context_dimension(self) -> int:
         """Calculate the dimension of the context vector"""
-        # Student features:
-        # - Major (one-hot encoded, ~50 common majors)
-        # - Classification level (5 levels)
-        # - GPA (1 continuous)
-        # - Credits completed (1 continuous, normalized)
-        # - Time preference (3 categories: morning/afternoon/evening)
-        # - Day preferences (7 binary features for each day)
-        # - Previous courses (binary vector for each subject, ~160 subjects)
-        # - Current search features (TF-IDF style features, ~20)
-        # - Active filters (binary vector, ~10 common filters)
-        # - Behavioral signals:
-        #   - Session hovers count (1)
-        #   - Session watchlist count (1)
-        #   - Session pagination count (1)
 
-        major_dim = 50  # Common majors
+        major_dim = 50
         classification_dim = 5
-        continuous_dim = 2  # GPA + credits
+        continuous_dim = 2
         time_pref_dim = 3
         day_pref_dim = 7
-        subject_history_dim = 160  # All subjects
+        subject_history_dim = 160
         search_features_dim = 20
         filter_dim = 10
         behavioral_dim = 3
@@ -164,8 +145,6 @@ class CourseRecommendationBandit:
         """Create list of possible course actions from available courses"""
         actions = []
 
-        # Create actions from actual course data
-        # Limit to first 100 for performance
         for course in self.available_courses[:100]:
             actions.append(CourseAction(
                 course_subject=course.get('subject_id', ''),
@@ -197,15 +176,13 @@ class CourseRecommendationBandit:
         """
         features = []
 
-        # Major (one-hot)
         major_vec = np.zeros(50)
         if context.major in self.major_to_idx:
             major_vec[self.major_to_idx[context.major]] = 1
         features.extend(major_vec)
 
-        # Classification level (one-hot)
         classification_vec = np.zeros(5)
-        # Handle both enum instances and integer values
+
         if isinstance(context.classification, ClassificationLevel):
             classification_idx = context.classification.value
         else:
@@ -213,63 +190,53 @@ class CourseRecommendationBandit:
         classification_vec[classification_idx] = 1
         features.extend(classification_vec)
 
-        # Continuous features (normalized)
-        features.append(context.current_gpa / 4.0)  # Normalize GPA
-        # Normalize credits
+        features.append(context.current_gpa / 4.0)
+
         features.append(min(context.credits_completed / 150.0, 1.0))
 
-        # Time preference (one-hot)
         time_prefs = ['morning', 'afternoon', 'evening']
         time_vec = np.zeros(3)
         if context.time_preference in time_prefs:
             time_vec[time_prefs.index(context.time_preference)] = 1
         features.extend(time_vec)
 
-        # Day preferences (binary)
         all_days = ['Monday', 'Tuesday', 'Wednesday',
                     'Thursday', 'Friday', 'Saturday', 'Sunday']
         day_vec = [1 if day in context.preferred_days else 0 for day in all_days]
         features.extend(day_vec)
 
-        # Previous courses (binary vector for subjects)
         all_subjects = self._get_all_subjects()
         subject_vec = np.zeros(len(all_subjects))
         for course in context.previous_courses:
             if course in self.subject_to_idx:
                 subject_vec[self.subject_to_idx[course]] = 1
 
-        # Pad or truncate to expected size
         if len(subject_vec) < 160:
             subject_vec = np.pad(subject_vec, (0, 160 - len(subject_vec)))
         else:
             subject_vec = subject_vec[:160]
         features.extend(subject_vec)
 
-        # Search features (simplified TF-IDF style)
         search_vec = np.zeros(20)
         if context.current_search_text:
-            # Simple hash-based features for search text
+
             for i, word in enumerate(context.current_search_text.lower().split()[:20]):
-                # Simple word importance
+
                 search_vec[i % 20] += len(word) / 10.0
         features.extend(search_vec)
 
-        # Active filters (binary)
         common_filters = ['morning', 'afternoon', 'evening', 'monday', 'tuesday',
                           'wednesday', 'thursday', 'friday', 'online', 'in-person']
         filter_vec = [
             1 if f in context.active_filters else 0 for f in common_filters]
         features.extend(filter_vec)
 
-        # Behavioral signals
-        # Normalize hover count
         features.append(min(len(context.session_hovers) / 10.0, 1.0))
-        # Normalize watchlist
+
         features.append(min(len(context.session_watchlisted) / 5.0, 1.0))
-        # Normalize pagination
+
         features.append(min(context.session_paginations / 10.0, 1.0))
 
-        # Ensure correct dimension
         feature_array = np.array(features)
         if len(feature_array) < self.context_dim:
             feature_array = np.pad(
@@ -298,10 +265,10 @@ class CourseRecommendationBandit:
         n_recommendations = min(n_recommendations, self.n_actions)
 
         if np.random.random() < self.epsilon:
-            # Explore: random courses
+
             return np.random.choice(self.n_actions, size=n_recommendations, replace=False).tolist()
         else:
-            # Exploit: top predicted courses
+
             predicted_rewards = self.predict_rewards(context)
             return np.argsort(predicted_rewards)[-n_recommendations:].tolist()
 
@@ -318,24 +285,20 @@ class CourseRecommendationBandit:
         context_vec = self._encode_context(context)
 
         for course_idx, reward in zip(recommended_courses, rewards):
-            # Predict current reward for the course
+
             predicted_reward = np.dot(self.weights[course_idx], context_vec)
 
-            # Calculate prediction error
             error = reward - predicted_reward
 
-            # Update weights using gradient descent
             self.weights[course_idx] += self.learning_rate * \
                 error * context_vec
 
-            # Update statistics
             self.total_reward += reward
             self.action_counts[course_idx] += 1
 
         self.n_steps += 1
         self.reward_history.extend(rewards)
 
-        # Decay epsilon
         self.epsilon *= self.epsilon_decay
 
     def calculate_reward(self, context: StudentContext, course_idx: int,
@@ -354,24 +317,21 @@ class CourseRecommendationBandit:
         base_reward = 0.0
         course = self.course_actions[course_idx]
 
-        # Positive rewards
         if user_action == 'hover':
-            base_reward = 0.1  # Small positive signal
+            base_reward = 0.1
         elif user_action == 'watchlist':
-            base_reward = 0.5  # Strong positive signal
+            base_reward = 0.5
         elif user_action == 'click':
-            base_reward = 0.3  # Moderate positive signal
+            base_reward = 0.3
 
-        # Negative rewards
         elif user_action == 'pagination':
-            base_reward = -0.1  # User went to next page without interacting
+            base_reward = -0.1
 
-        # Contextual adjustments
         if course.course_subject in context.previous_courses:
-            base_reward *= 0.8  # Slight penalty for recommending same subject
+            base_reward *= 0.8
 
         if course.course_subject.lower() in context.current_search_text.lower():
-            base_reward *= 1.2  # Bonus for matching search intent
+            base_reward *= 1.2
 
         return base_reward
 
@@ -426,15 +386,12 @@ def create_sample_context() -> StudentContext:
     )
 
 
-# Example usage
 if __name__ == "__main__":
     from section import courses
     bandit = CourseRecommendationBandit(courses)
 
-    # Create sample context
     student_context = create_sample_context()
 
-    # Get recommendations
     recommended_courses = bandit.select_courses(
         student_context, n_recommendations=2)
 
@@ -447,10 +404,9 @@ if __name__ == "__main__":
             f"{i+1}. {course.course_subject} {course.course_number}: {course.course_title}")
         print(f"   {explanation}")
 
-    # Simulate user interactions and update
     rewards = []
     for course_idx in recommended_courses:
-        # Simulate different user actions
+
         action = np.random.choice(['hover', 'watchlist', 'click', 'pagination'],
                                   p=[0.4, 0.2, 0.3, 0.1])
         reward = bandit.calculate_reward(student_context, course_idx, action)
@@ -458,7 +414,6 @@ if __name__ == "__main__":
         print(f"User {action} on {
               bandit.course_actions[course_idx].course_subject}: reward = {reward}")
 
-    # Update bandit
     bandit.update(student_context, recommended_courses, rewards)
 
     print(f"\nBandit updated. Current epsilon: {bandit.epsilon:.3f}")

@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn.metrics import ndcg_score
 import seaborn as sns
 
-# Import from your existing code
+
 from model import (
     StudentContext, CourseRecommendationBandit,
     ClassificationLevel, CourseAction
@@ -62,7 +62,7 @@ class OnlineEvaluator(BaseEvaluator):
     """
 
     def __init__(self, k: int = 5):
-        self.k = k  # Top-k recommendations to evaluate
+        self.k = k
 
     def evaluate(self, bandit: CourseRecommendationBandit,
                  interactions: List[UserInteraction]) -> EvaluationMetrics:
@@ -74,20 +74,18 @@ class OnlineEvaluator(BaseEvaluator):
         watchlists = 0
         recommended_courses = set()
         subjects_recommended = set()
-        positive_interactions = 0  # clicks + watchlists
-        total_relevant = 0  # for precision/recall
+        positive_interactions = 0
+        total_relevant = 0
         exploration_count = 0
 
-        # Track regret (compared to oracle)
         oracle_rewards = []
         actual_rewards = []
 
         for interaction in interactions:
-            if interaction.course_idx != -1:  # Course-specific interaction
+            if interaction.course_idx != -1:
                 total_reward += interaction.reward
                 actual_rewards.append(interaction.reward)
 
-                # Calculate oracle reward (best possible choice)
                 oracle_reward = self._calculate_oracle_reward(
                     interaction.student_context,
                     interaction.recommended_courses,
@@ -95,7 +93,6 @@ class OnlineEvaluator(BaseEvaluator):
                 )
                 oracle_rewards.append(oracle_reward)
 
-                # Count interaction types
                 if interaction.interaction_type == InteractionType.CLICK:
                     clicks += 1
                     positive_interactions += 1
@@ -103,12 +100,10 @@ class OnlineEvaluator(BaseEvaluator):
                     watchlists += 1
                     positive_interactions += 1
 
-                # Track coverage and diversity
                 recommended_courses.add(interaction.course_idx)
                 course = bandit.course_actions[interaction.course_idx]
                 subjects_recommended.add(course.course_subject)
 
-                # Check if this was exploration vs exploitation
                 predicted_rewards = bandit.predict_rewards(
                     interaction.student_context)
                 best_courses = np.argsort(
@@ -118,7 +113,6 @@ class OnlineEvaluator(BaseEvaluator):
 
             total_recommendations += len(interaction.recommended_courses)
 
-        # Calculate metrics
         n_interactions = len([i for i in interactions if i.course_idx != -1])
 
         metrics = EvaluationMetrics(
@@ -156,21 +150,21 @@ class OnlineEvaluator(BaseEvaluator):
         ndcg_scores = []
         for interaction in interactions:
             if interaction.course_idx != -1:
-                # Create relevance scores (higher for positive interactions)
+
                 relevance = []
                 for course_idx in interaction.recommended_courses:
                     if course_idx == interaction.course_idx:
                         if interaction.interaction_type in [InteractionType.CLICK, InteractionType.WATCHLIST]:
-                            relevance.append(2)  # Highly relevant
+                            relevance.append(2)
                         elif interaction.interaction_type == InteractionType.HOVER:
-                            relevance.append(1)  # Somewhat relevant
+                            relevance.append(1)
                         else:
-                            relevance.append(0)  # Not relevant
+                            relevance.append(0)
                     else:
-                        relevance.append(0)  # Unknown relevance
+                        relevance.append(0)
 
                 if sum(relevance) > 0:
-                    # NDCG expects shape (1, n_samples)
+
                     true_relevance = np.array([relevance])
                     predicted_scores = bandit.predict_rewards(
                         interaction.student_context)
@@ -182,7 +176,7 @@ class OnlineEvaluator(BaseEvaluator):
                             true_relevance, pred_scores, k=self.k)
                         ndcg_scores.append(ndcg)
                     except:
-                        pass  # Skip if NDCG calculation fails
+                        pass
 
         return np.mean(ndcg_scores) if ndcg_scores else 0.0
 
@@ -194,7 +188,7 @@ class OfflineEvaluator(BaseEvaluator):
     """
 
     def __init__(self, logging_policy: Optional[Callable] = None, k: int = 5):
-        # The policy that generated the logged data
+
         self.logging_policy = logging_policy
         self.k = k
 
@@ -202,10 +196,8 @@ class OfflineEvaluator(BaseEvaluator):
                  interactions: List[UserInteraction]) -> EvaluationMetrics:
         """Offline evaluation using IPS and direct method"""
 
-        # Direct Method (DM): Use model predictions
         dm_rewards = []
 
-        # Inverse Propensity Scoring (IPS): Weight by inverse probability
         ips_rewards = []
 
         total_interactions = 0
@@ -215,12 +207,10 @@ class OfflineEvaluator(BaseEvaluator):
             if interaction.course_idx != -1:
                 total_interactions += 1
 
-                # Direct Method
                 predicted_reward = bandit.predict_rewards(interaction.student_context)[
                     interaction.course_idx]
                 dm_rewards.append(predicted_reward)
 
-                # IPS (simplified - assumes uniform logging policy)
                 propensity = 1.0 / len(interaction.recommended_courses)
                 ips_reward = interaction.reward / propensity
                 ips_rewards.append(ips_reward)
@@ -228,28 +218,26 @@ class OfflineEvaluator(BaseEvaluator):
                 if interaction.interaction_type in [InteractionType.CLICK, InteractionType.WATCHLIST]:
                     positive_interactions += 1
 
-        # Combine DM and IPS (Doubly Robust)
         dr_rewards = []
         for dm_reward, ips_reward in zip(dm_rewards, ips_rewards):
-            dr_reward = dm_reward + ips_reward - dm_reward  # Simplified DR
+            dr_reward = dm_reward + ips_reward - dm_reward
             dr_rewards.append(dr_reward)
 
         avg_reward = np.mean(dr_rewards) if dr_rewards else 0.0
 
-        # Calculate other metrics similar to online evaluator
         metrics = EvaluationMetrics(
             cumulative_reward=sum(dr_rewards),
             average_reward=avg_reward,
-            regret=0.0,  # Hard to estimate offline
+            regret=0.0,
             click_through_rate=positive_interactions /
             max(total_interactions, 1),
-            watchlist_rate=0.0,  # Simplified
-            coverage=0.0,  # Would need full course catalog
-            diversity=0.0,  # Would need subject analysis
+            watchlist_rate=0.0,
+            coverage=0.0,
+            diversity=0.0,
             precision_at_k=positive_interactions / max(total_interactions, 1),
-            recall_at_k=0.0,  # Hard to estimate offline
-            ndcg_at_k=0.0,  # Would need relevance labels
-            exploration_rate=0.0  # Hard to estimate offline
+            recall_at_k=0.0,
+            ndcg_at_k=0.0,
+            exploration_rate=0.0
         )
 
         return metrics
@@ -270,11 +258,9 @@ class SimulationEvaluator(BaseEvaluator):
                  interactions: List[UserInteraction] = None) -> EvaluationMetrics:
         """Evaluate using simulation"""
 
-        # Generate fresh interactions for evaluation
         eval_interactions = list(
             self.simulator.generate_interactions(self.n_episodes))
 
-        # Use online evaluator with simulated data
         online_eval = OnlineEvaluator(self.k)
         return online_eval.evaluate(bandit, eval_interactions)
 
@@ -293,7 +279,6 @@ class CrossValidationEvaluator:
                  interactions: List[UserInteraction]) -> Dict[str, EvaluationMetrics]:
         """Perform time-based cross-validation"""
 
-        # Sort interactions by timestamp
         sorted_interactions = sorted(interactions, key=lambda x: x.timestamp)
 
         fold_size = len(sorted_interactions) // self.n_folds
@@ -304,15 +289,12 @@ class CrossValidationEvaluator:
             end_idx = (fold + 1) * fold_size if fold < self.n_folds - \
                 1 else len(sorted_interactions)
 
-            # Train on all data except current fold
             train_interactions = (sorted_interactions[:start_idx] +
                                   sorted_interactions[end_idx:])
             test_interactions = sorted_interactions[start_idx:end_idx]
 
-            # Train bandit on training data
             fold_bandit = self._train_bandit_copy(bandit, train_interactions)
 
-            # Evaluate on test data
             evaluator = self.evaluator_class()
             metrics = evaluator.evaluate(fold_bandit, test_interactions)
             results[f'fold_{fold}'] = metrics
@@ -322,7 +304,7 @@ class CrossValidationEvaluator:
     def _train_bandit_copy(self, original_bandit: CourseRecommendationBandit,
                            train_interactions: List[UserInteraction]) -> CourseRecommendationBandit:
         """Create and train a copy of the bandit"""
-        # Create a fresh bandit with same parameters
+
         new_bandit = CourseRecommendationBandit(
             original_bandit.available_courses,
             original_bandit.learning_rate,
@@ -330,7 +312,6 @@ class CrossValidationEvaluator:
             original_bandit.epsilon_decay
         )
 
-        # Train on interactions
         for interaction in train_interactions:
             if interaction.course_idx != -1:
                 new_bandit.update(
@@ -358,29 +339,24 @@ class ComprehensiveEvaluationSuite:
 
         results = {}
 
-        # Online evaluation
         print("Running online evaluation...")
         online_eval = OnlineEvaluator()
         results['online'] = online_eval.evaluate(bandit, interactions)
 
-        # Offline evaluation
         print("Running offline evaluation...")
         offline_eval = OfflineEvaluator()
         results['offline'] = offline_eval.evaluate(bandit, interactions)
 
-        # Simulation evaluation (if simulator provided)
         if simulator:
             print("Running simulation evaluation...")
             sim_eval = SimulationEvaluator(simulator, n_episodes=500)
             results['simulation'] = sim_eval.evaluate(bandit)
 
-        # Cross-validation
-        if len(interactions) > 100:  # Only if we have enough data
+        if len(interactions) > 100:
             print("Running cross-validation...")
             cv_eval = CrossValidationEvaluator(n_folds=3)
             cv_results = cv_eval.evaluate(bandit, interactions)
 
-            # Average CV results
             avg_metrics = self._average_cv_results(cv_results)
             results['cross_validation'] = avg_metrics
 
@@ -406,7 +382,6 @@ class ComprehensiveEvaluationSuite:
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         fig.suptitle('Bandit Evaluation Results', fontsize=16)
 
-        # Prepare data for plotting
         methods = list(self.results.keys())
         metrics_data = {}
 
@@ -417,7 +392,6 @@ class ComprehensiveEvaluationSuite:
             metrics_data[metric] = [self.results[method].to_dict()[metric]
                                     for method in methods]
 
-        # Plot each metric
         for i, metric in enumerate(key_metrics):
             row, col = i // 3, i % 3
             ax = axes[row, col]
@@ -427,7 +401,6 @@ class ComprehensiveEvaluationSuite:
             ax.set_ylabel('Value')
             plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
-            # Add value labels on bars
             for bar, value in zip(bars, metrics_data[metric]):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
                         f'{value:.3f}', ha='center', va='bottom', fontsize=8)
@@ -456,7 +429,6 @@ class ComprehensiveEvaluationSuite:
 
             report += "\n"
 
-        # Add interpretation
         report += "INTERPRETATION:\n"
         report += "-" * 30 + "\n"
 
@@ -465,7 +437,6 @@ class ComprehensiveEvaluationSuite:
         report += f"Best performing method: {best_method[0]} "
         report += f"(avg reward: {best_method[1].average_reward:.4f})\n\n"
 
-        # Check for potential issues
         if best_method[1].exploration_rate < 0.1:
             report += "⚠️  Low exploration rate detected - model may be under-exploring\n"
 
@@ -475,14 +446,12 @@ class ComprehensiveEvaluationSuite:
         return report
 
 
-# Example usage
 def demo_evaluation():
     """Demonstrate the evaluation framework"""
 
     print("Bandit Evaluation Framework Demo")
     print("=" * 40)
 
-    # This would use your actual bandit and data
     print("\nEvaluation Methods Available:")
     print("1. Online Evaluation - Uses real user interactions")
     print("2. Offline Evaluation - Uses historical data with IPS")
@@ -503,13 +472,13 @@ def demo_evaluation():
 
     print("\nExample Usage:")
     print("""
-    # Initialize evaluation suite
+    
     eval_suite = ComprehensiveEvaluationSuite()
     
-    # Run evaluation
+    
     results = eval_suite.run_evaluation(bandit, interactions, simulator)
     
-    # Generate plots and report
+    
     eval_suite.plot_results('evaluation_results.png')
     report = eval_suite.generate_report()
     print(report)
