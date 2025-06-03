@@ -10,7 +10,7 @@ class QTableDefaultFactory:
         return [0.0] * self.n_actions
 
 class QLearningAgent:
-  def __init__(self, action_space, state_dim, alpha=0.5, gamma=0.9, epsilon=1.0, epsilon_min=0.5, epsilon_decay=0.999):
+  def __init__(self, action_space, state_dim, alpha=0.5, gamma=0.95, epsilon=1.0, epsilon_min=0.05, epsilon_decay=0.995):
     self.q_table = defaultdict(QTableDefaultFactory(len(action_space)))
     self.action_space = action_space
     self.alpha = alpha
@@ -41,12 +41,13 @@ class QLearningAgent:
   def decay_epsilon(self):
     if self.epsilon > self.epsilon_min:
       self.epsilon *= self.epsilon_decay
+    self.epsilon = max(self.epsilon, self.epsilon_min)
 
   def save(self, filepath):
     with open(filepath, 'wb') as f:
-        pickle.dump(self.q_table, f)
+      pickle.dump(self.q_table, f)
 
   def load(self, filepath):
     with open(filepath, 'rb') as f:
-        self.q_table = pickle.load(f)
+      self.q_table = pickle.load(f)
 
